@@ -60,6 +60,9 @@
 #include <dirent.h>
 #include <vector>
 
+// Read-only USB enumeration probe, enabled by a marker file.
+void PS4BuzzUSBProbe();
+
 static int s_log = -1;
 
 #if defined(PCSX2_PS4_VM_BOOT_JIT)
@@ -989,6 +992,7 @@ int main()
 	ProbeLog("PS4 log startup: fd=%d synchronous_marker=%d kernel_mirror=%d thread_result=%d verbose=%d\n", s_log, synchronous_log, kernel_log, log_thread_result, s_verbose_diag ? 1 : 0);
 	PS4ProbeLogger::LogStatus();
 	PS4Telemetry::Stage("loading-modules");
+	PS4BuzzUSBProbe();
 	ProbeLog("STAGE: loading system modules\n");
 	const int system_service_result = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SYSTEM_SERVICE);
 	// (AI-assisted) Load VideoOut before the shared Vulkan menu/game device.
