@@ -4,6 +4,7 @@
 #include "USB/USB.h"
 #include <orbis/Usbd.h>
 #include <orbis/libkernel.h>
+#include <orbis/Sysmodule.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <atomic>
@@ -276,11 +277,34 @@ void PS4BuzzUSBStart()
     ProbeLog("BUZZ_USB: STAGE=starting target=%04x:%04x guest_port=%u\n",
         BUZZ_VID, BUZZ_PID, GUEST_PORT + 1);
 
-    const int module = static_cast<int>(sceKernelLoadStartModule("libSceUsbd.sprx", 0, nullptr, 0, nullptr, nullptr));
-    ProbeLog("BUZZ_USB: module load result=%#x\n", module);
-    if (module < 0 || !ResolveFunctions(module))
+    // Relative "libSceUsbd.sprx" returned ENOENT (0x80020002) on firmware 9.00.
+    // Register the system module first, then resolve its exports from an absolute path.
+    const int sysmodule_result = sceSysmoduleLoadModule(ORBIS_SYSMODULE_USBD);
+    ProbeLog("BUZZ_USB: sysmodule USBD (0x00b7) load=%#x\n", sysmodule_result);
+    constexpr const char* MODULE_PATHS[] = {
+        "/system/common/lib/libSceUsbd.sprx",
+        "/system/priv/lib/libSceUsbd.sprx",
+        "libSceUsbd.sprx"
+    };
+    int module = -1;
+    for (const char* module_path : MODULE_PATHS)
     {
-        ProbeLog("BUZZ_USB: STAGE=api-unavailable\n");
+        const int result = static_cast<int>(sceKernelLoadStartModule(module_path, 0, nullptr, 0, nullptr, nullptr));
+        ProbeLog("BUZZ_USB: module path=%s load=%#x\n", module_path, result);
+        if (result >= 0)
+        {
+            module = result;
+            break;
+        }
+    }
+    if (module < 0)
+    {
+        ProbeLog("BUZZ_USB: STAGE=module-load-failed (sysmodule_result=%#x)\n", sysmodule_result);
+        return;
+    }
+    if (!ResolveFunctions(module))
+    {
+        ProbeLog("BUZZ_USB: STAGE=missing-usbd-exports module=%#x\n", module);
         return;
     }
 
