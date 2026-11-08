@@ -297,6 +297,7 @@ add_executable(vm_boot main.cpp GameMenu.cpp CoverImage.cpp CoverDownload.cpp Re
   "${PCSX2_ROOT}/ps4/core/EEHotspotsPS4.cpp"
   "${PCSX2_ROOT}/ps4/core/ThreadAffinityPS4.cpp"
   "${PCSX2_ROOT}/ps4/core/AudioStreamPS4.cpp"
+  "${PCSX2_ROOT}/ps4/core/BuzzUSBProbePS4.cpp"
   "${PCSX2_ROOT}/ps4/core/ProbeLoggerPS4.cpp"
   "${PCSX2_ROOT}/ps4/core/TelemetryPS4.cpp"
   ${vm_sources} ${PS4_RUNTIME_SOURCES})
