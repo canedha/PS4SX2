@@ -60,8 +60,11 @@
 #include <dirent.h>
 #include <vector>
 
-// Read-only USB enumeration probe, enabled by a marker file.
-void PS4BuzzUSBProbe();
+// USB host polling runs on its own thread; guest updates stay on the EE thread.
+void PS4BuzzUSBStart();
+void PS4BuzzUSBStop();
+void PS4BuzzUSBPollGuest();
+void PS4BuzzUSBLogStatus();
 
 static int s_log = -1;
 
@@ -300,6 +303,7 @@ void VMHostPoll()
 	if (elapsed - s_last_input < 0.01)
 		return;
 	s_last_input = elapsed;
+	PS4BuzzUSBPollGuest();
 	PS4ThreadCPUMetrics::Sample(PS4ThreadCPUMetrics::Role::EE);
 	// (AI-assisted) Verbose 1s heartbeat when paused/menu open, 5s otherwise. Needs proper testing.
 	const bool should_log_heartbeat = s_verbose_diag ?
@@ -351,6 +355,7 @@ void VMHostPoll()
 			IPUCoreStatus.WaitingOnIPUTo, IPUCoreStatus.WaitingOnIPUFrom, IPUCoreStatus.DataRequested,
 			ipu1ch.qwc, static_cast<u32>(ipu1ch.chcr.STR), ipu0ch.qwc, static_cast<u32>(ipu0ch.chcr.STR));
 		PS4Audio::LogStatus();
+		PS4BuzzUSBLogStatus();
 		PS4ProbeLogger::LogStatus();
 		// Do not attribute host logging/control work to the following guest gap.
 		PS4EEEventProfile::s_sampling.gap_pending = false;
@@ -913,6 +918,7 @@ static void* RunVM(void*)
 			Threading::Sleep(50);
 			PS4GameMenu::HideLoading();
 		}
+		PS4BuzzUSBStart();
 		VMManager::SetPaused(false);
 		while (VMManager::GetState() != VMState::Stopping && VMManager::GetState() != VMState::Shutdown)
 		{
@@ -927,6 +933,7 @@ static void* RunVM(void*)
 				VMManager::Execute();
 			}
 		}
+		PS4BuzzUSBStop();
 		PS4EEEventProfile::s_sampling.enabled = false;
 		PS4EEHotspots::Reset(false);
 		PS4EEHotspots::ResetBlockSampling(false);
@@ -992,7 +999,6 @@ int main()
 	ProbeLog("PS4 log startup: fd=%d synchronous_marker=%d kernel_mirror=%d thread_result=%d verbose=%d\n", s_log, synchronous_log, kernel_log, log_thread_result, s_verbose_diag ? 1 : 0);
 	PS4ProbeLogger::LogStatus();
 	PS4Telemetry::Stage("loading-modules");
-	PS4BuzzUSBProbe();
 	ProbeLog("STAGE: loading system modules\n");
 	const int system_service_result = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SYSTEM_SERVICE);
 	// (AI-assisted) Load VideoOut before the shared Vulkan menu/game device.
