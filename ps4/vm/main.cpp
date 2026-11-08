@@ -706,7 +706,10 @@ static void* RunVM(void*)
 	// (AI-assisted) The Orbis Cubeb slot routes to native PS4 AudioOut.
 	const bool audio_enabled = access("/data/PS4SX2/vm-no-audio", F_OK) != 0;
 	settings->SetStringValue("SPU2/Output", "Backend", audio_enabled ? "Cubeb" : "Null");
-	settings->SetStringValue("SPU2/Output", "SyncMode", "TimeStretch");
+	// Optional diagnostic path: bypass SoundTouch TimeStretch while testing
+	// native AudioOut startup. Expect distorted timing below full emulation speed.
+	const bool audio_no_stretch = access("/data/PS4SX2/vm-audio-no-stretch", F_OK) == 0;
+	settings->SetStringValue("SPU2/Output", "SyncMode", audio_no_stretch ? "Disabled" : "TimeStretch");
 	// (AI-assisted) Longer sequences suit slowed audio and need fewer overlap
 	// searches. Leave enough queued audio for the resulting larger bursts.
 	// Needs proper testing with speech, transitions and pause on the console.
@@ -723,7 +726,7 @@ static void* RunVM(void*)
 	settings->SetIntValue("SPU2/Output", "StandardVolume", 100);
 	settings->SetBoolValue("SPU2/Output", "OutputMuted", false);
 	ProbeLog("PS4 audio configuration: %s (stereo PCM16 48 kHz, main port, explicit 0 dB; disable with /data/PS4SX2/vm-no-audio)\n",
-		audio_enabled ? "native AudioOut with TimeStretch" : "Null by marker");
+		!audio_enabled ? "Null by marker" : audio_no_stretch ? "native AudioOut without TimeStretch (diagnostic)" : "native AudioOut with TimeStretch");
 	PrepareEmulatorFolders(*settings);
 	PS4GSProfile::enabled = access("/data/PS4SX2/vm-profile-gs", F_OK) == 0 &&
 	                        access("/data/PS4SX2/vm-no-gs-profile", F_OK) != 0;
