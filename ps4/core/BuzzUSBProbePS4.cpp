@@ -160,9 +160,11 @@ void InspectEndpoints(libusb_device* device)
 bool DecodeReport(const unsigned char* data, int size, uint32_t& buttons)
 {
     int offset = 0;
-    if (size >= 7 && data[0] == 0 && data[1] == 0x7f && data[2] == 0x7f)
+    // Buzz's on-wire payload is 5 bytes (7f 7f + 20 bits + 4-bit tail).
+    // Windows HID APIs may prepend a zero report-ID byte, making it 6.
+    if (size >= 6 && data[0] == 0 && data[1] == 0x7f && data[2] == 0x7f)
         offset = 1;
-    if (size < offset + 6 || data[offset] != 0x7f || data[offset + 1] != 0x7f)
+    if (size < offset + 5 || data[offset] != 0x7f || data[offset + 1] != 0x7f)
         return false;
     buttons = (uint32_t(data[offset + 2]) |
         (uint32_t(data[offset + 3]) << 8) |
