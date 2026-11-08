@@ -78,6 +78,7 @@ namespace
 
 		bool Open(bool stretch_enabled, Error* error)
 		{
+			ProbeLog("PS4 audio: STAGE=Open-entry rate=%u stretch=%d\n", m_sample_rate, stretch_enabled ? 1 : 0);
 			s_output.attempted.store(true, std::memory_order_relaxed);
 			s_output.status.store(0, std::memory_order_relaxed);
 			s_output.buffers.store(0, std::memory_order_relaxed);
@@ -113,12 +114,15 @@ namespace
 					return Fail("audio resampler creation", result ? result : -1, error);
 			}
 
+			ProbeLog("PS4 audio: STAGE=before-sysmodule-load\n");
 			const int module_result = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_AUDIOOUT);
+			ProbeLog("PS4 audio: STAGE=before-audio-init module_result=%#x\n", module_result);
 			const int init_result = sceAudioOutInit();
 			ProbeLog("PS4 audio: module=%#x init=%#x\n", module_result, init_result);
 			if (init_result < 0 && static_cast<u32>(init_result) != ORBIS_AUDIO_OUT_ERROR_ALREADY_INIT)
 				return Fail("sceAudioOutInit", init_result, error);
 
+			ProbeLog("PS4 audio: STAGE=before-audio-open\n");
 			m_handle = sceAudioOutOpen(ORBIS_USER_SERVICE_USER_ID_SYSTEM, ORBIS_AUDIO_OUT_PORT_TYPE_MAIN,
 				0, GRAIN, OUTPUT_RATE, ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_STEREO);
 			ProbeLog("PS4 audio: open=%#x input_rate=%u output_rate=%u resampler=%s channels=2 grain=%u format=s16_stereo stretch=%s buffer_ms=%u\n",
@@ -128,6 +132,7 @@ namespace
 
 			// (AI-assisted) Match DolphinPS4's main-port PCM16 and explicit 0 dB
 			// gain. The upstream queue already applies the user's volume/mute.
+			ProbeLog("PS4 audio: STAGE=before-port-state\n");
 			RefreshPortState();
 			ProbeLog("PS4 audio port before gain: result=%#x output=%#x channels=%u volume_raw=%d flags=%#llx\n",
 				s_output.port_result.load(), s_output.port_output.load(), s_output.port_channels.load(),
@@ -139,11 +144,13 @@ namespace
 				return Fail("sceAudioOutSetVolume", volume_result, error);
 			RefreshPortState();
 
+			ProbeLog("PS4 audio: STAGE=before-BaseInitialize stretch=%d\n", stretch_enabled ? 1 : 0);
 			BaseInitialize(&StereoSampleReaderImpl, stretch_enabled);
 			ProbeLog("PS4 audio stretch: sequence_ms=%u seek_ms=%u overlap_ms=%u quick_seek=%u target_ms=%u\n",
 				m_parameters.stretch_sequence_length_ms, m_parameters.stretch_seekwindow_ms,
 				m_parameters.stretch_overlap_ms, static_cast<unsigned>(m_parameters.stretch_use_quickseek),
 				m_parameters.buffer_ms);
+			ProbeLog("PS4 audio: STAGE=before-pthread-create\n");
 			pthread_attr_t attr;
 			int result = pthread_attr_init(&attr);
 			if (result == 0)
@@ -159,6 +166,7 @@ namespace
 			if (result != 0)
 				return Fail("audio worker creation", result, error);
 			m_thread_started = true;
+			ProbeLog("PS4 audio: STAGE=Open-ready\n");
 			return true;
 		}
 
@@ -366,6 +374,7 @@ std::vector<AudioStream::DeviceInfo> AudioStream::GetCubebOutputDevices(const ch
 std::unique_ptr<AudioStream> AudioStream::CreateCubebAudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
 	const char*, const char*, bool stretch_enabled, Error* error)
 {
+	ProbeLog("PS4 audio: STAGE=factory-enter rate=%u stretch=%d\n", sample_rate, stretch_enabled ? 1 : 0);
 	AudioStreamParameters stereo = parameters;
 	stereo.expansion_mode = AudioExpansionMode::Disabled;
 	auto stream = std::make_unique<PS4AudioStream>(sample_rate, stereo);
