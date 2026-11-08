@@ -181,7 +181,7 @@ void* USBThread(void*)
     {
         unsigned char report[64]{};
         int32_t received = 0;
-        const int result = s_api.interrupt(s_handle, s_endpoint, report, sizeof(report), &received, 30);
+        const int result = s_api.interrupt(s_handle, s_endpoint, report, sizeof(report), &received, 100);
         ++attempts;
         if (result == 0 && received > 0)
         {
@@ -205,8 +205,10 @@ void* USBThread(void*)
                 }
             }
         }
-        else if (result == -7) // libusb timeout, not a device failure
+        else if (static_cast<uint32_t>(result) == 0x80240007u || result == -7)
         {
+            // libSceUsbd returns SCE_USBD_ERROR_TIMEOUT (0x80240007) when no
+            // button has changed. This is expected for an idle HID receiver.
             s_timeouts.fetch_add(1, std::memory_order_relaxed);
         }
         else
