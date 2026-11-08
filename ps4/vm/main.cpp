@@ -693,6 +693,8 @@ static void* RunVM(void*)
 	settings->SetBoolValue("Achievements", "Enabled", false);
 	// (AI-assisted) Both library and VM poll scePad directly on PS4.
 	settings->SetBoolValue("InputSources", "SDL", false);
+	// Enable emulated PS2 Buzz controllers on USB port 1.
+	settings->SetStringValue("USB1", "Type", "BuzzDevice");
 	// (AI-assisted) The Orbis Cubeb slot routes to native PS4 AudioOut.
 	const bool audio_enabled = access("/data/PS4SX2/vm-no-audio", F_OK) != 0;
 	settings->SetStringValue("SPU2/Output", "Backend", audio_enabled ? "Cubeb" : "Null");
