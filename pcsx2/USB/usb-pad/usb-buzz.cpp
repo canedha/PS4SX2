@@ -12,9 +12,22 @@
 #include "USB/usb-pad/usb-buzz.h"
 #include "USB/usb-pad/usb-pad.h"
 #include <common/Console.h>
+#include <atomic>
 
 namespace usb_pad
 {
+    // Read by the PS4 host heartbeat to distinguish a real HID problem
+    // from the emulated PS2 game no longer polling its USB interrupt endpoint.
+    static std::atomic<uint64_t> s_buzz_usb_in_polls{0};
+    static std::atomic<uint64_t> s_buzz_usb_reports{0};
+    static std::atomic<uint64_t> s_buzz_usb_naks{0};
+
+    void BuzzGetTrafficStats(uint64_t& polls, uint64_t& reports, uint64_t& naks)
+    {
+        polls = s_buzz_usb_in_polls.load(std::memory_order_relaxed);
+        reports = s_buzz_usb_reports.load(std::memory_order_relaxed);
+        naks = s_buzz_usb_naks.load(std::memory_order_relaxed);
+    }
 	static const USBDescStrings desc_strings = {
 		"",
 		"Logitech Buzz(tm) Controller V1",
@@ -164,6 +177,7 @@ namespace usb_pad
 		switch (p->pid)
 		{
 			case USB_TOKEN_IN:
+                s_buzz_usb_in_polls.fetch_add(1, std::memory_order_relaxed);
 				if (std::memcmp(&s->lastData, &s->data, sizeof(s->data)) != 0)
 				{
 					pxAssert(p->buffer_size >= sizeof(s->data));
@@ -175,9 +189,11 @@ namespace usb_pad
 					std::memcpy(&s->lastData, &s->data, sizeof(s->data));
 
 					p->actual_length += sizeof(s->data);
+                    s_buzz_usb_reports.fetch_add(1, std::memory_order_relaxed);
 				}
 				else
 				{
+                    s_buzz_usb_naks.fetch_add(1, std::memory_order_relaxed);
 					p->status = USB_RET_NAK;
 				}
 				break;
