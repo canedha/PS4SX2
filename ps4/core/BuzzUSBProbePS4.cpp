@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <atomic>
 #include <cstdint>
-#include <chrono>
 
 extern void ProbeLog(const char* format, ...);
 namespace usb_pad { void BuzzGetTrafficStats(uint64_t& polls, uint64_t& reports, uint64_t& naks); }
@@ -86,7 +85,8 @@ bool s_session = false;
 int s_interface = 0;
 unsigned char s_endpoint = 0x81;
 uint32_t s_previous_guest_mask = ~uint32_t{0};
-std::chrono::steady_clock::time_point s_press_hold_until[20]{};
+uint32_t s_press_hold_start_cycle[20]{};
+bool s_press_hold_active[20]{};
 uint64_t s_guest_updates = 0;
 std::atomic<bool> s_polling{false};
 std::atomic<uint32_t> s_buttons{0};
@@ -278,8 +278,8 @@ void PS4BuzzUSBStart()
 {
     s_session = true;
     s_previous_guest_mask = ~uint32_t{0};
-    for (auto& until : s_press_hold_until)
-        until = std::chrono::steady_clock::time_point{};
+    for (auto& active : s_press_hold_active)
+        active = false;
     s_guest_updates = 0;
     s_press_edges.store(0);
     s_buttons.store(0);
@@ -397,24 +397,41 @@ void PS4BuzzUSBStart()
         s_polling.store(false, std::memory_order_release);
 }
 
-void PS4BuzzUSBPollGuest()
+void PS4BuzzUSBPollGuest(uint32_t guest_cycle)
 {
     if (!s_session)
         return;
-    // At slow emulation speeds, real HID press+release can occur between guest
-    // polls. Latch rising edges for at least 120 ms of host time, so that the
-    // emulated PS2 USB interrupt endpoint has a chance to observe the press.
-    const auto now = std::chrono::steady_clock::now();
+    // At slow emulation speeds a quick HID press/release can fall between PS2
+    // game frames. Preserve its rising edge for about ONE emulated PAL frame,
+    // not 120 ms of wall time (which caused multiple menu moves at 35 FPS).
+    // EE cycles are 32-bit, so unsigned subtraction also handles wraparound.
+    constexpr uint32_t MIN_PRESS_EE_CYCLES = 6000000;
     const uint32_t physical = s_buttons.load(std::memory_order_acquire);
     const uint32_t edges = s_press_edges.exchange(0, std::memory_order_acq_rel);
+
     for (unsigned bit = 0; bit < 20; ++bit)
-        if (edges & (1u << bit))
-            s_press_hold_until[bit] = now + std::chrono::milliseconds(120);
+    {
+        if (!(edges & (1u << bit)))
+            continue;
+        // Another colour from the same player must not inherit the previous
+        // colour's artificial hold. Real simultaneous physical holds remain.
+        const unsigned first = (bit / 5) * 5;
+        for (unsigned other = first; other < first + 5; ++other)
+            if (other != bit && !(physical & (1u << other)))
+                s_press_hold_active[other] = false;
+        s_press_hold_start_cycle[bit] = guest_cycle;
+        s_press_hold_active[bit] = true;
+    }
 
     uint32_t mask = physical;
     for (unsigned bit = 0; bit < 20; ++bit)
-        if (now < s_press_hold_until[bit])
+    {
+        if (s_press_hold_active[bit] &&
+            static_cast<uint32_t>(guest_cycle - s_press_hold_start_cycle[bit]) < MIN_PRESS_EE_CYCLES)
             mask |= (1u << bit);
+        else
+            s_press_hold_active[bit] = false;
+    }
     const uint32_t diff = s_previous_guest_mask ^ mask;
     if (!diff)
         return;
