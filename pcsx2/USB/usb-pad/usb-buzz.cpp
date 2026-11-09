@@ -13,6 +13,7 @@
 #include "USB/usb-pad/usb-pad.h"
 #include <common/Console.h>
 #include <atomic>
+#include <cstdint>
 
 namespace usb_pad
 {
