@@ -63,7 +63,7 @@
 // USB host polling runs on its own thread; guest updates stay on the EE thread.
 void PS4BuzzUSBStart();
 void PS4BuzzUSBStop();
-void PS4BuzzUSBPollGuest();
+void PS4BuzzUSBPollGuest(uint32_t guest_cycle);
 void PS4BuzzUSBLogStatus();
 
 static int s_log = -1;
@@ -303,7 +303,7 @@ void VMHostPoll()
 	if (elapsed - s_last_input < 0.01)
 		return;
 	s_last_input = elapsed;
-	PS4BuzzUSBPollGuest();
+	PS4BuzzUSBPollGuest(cpuRegs.cycle);
 	PS4ThreadCPUMetrics::Sample(PS4ThreadCPUMetrics::Role::EE);
 	// (AI-assisted) Verbose 1s heartbeat when paused/menu open, 5s otherwise. Needs proper testing.
 	const bool should_log_heartbeat = s_verbose_diag ?
