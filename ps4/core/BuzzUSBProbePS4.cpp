@@ -9,8 +9,10 @@
 #include <unistd.h>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
 
 extern void ProbeLog(const char* format, ...);
+namespace usb_pad { void BuzzGetTrafficStats(uint64_t& polls, uint64_t& reports, uint64_t& naks); }
 
 namespace
 {
@@ -84,8 +86,12 @@ bool s_session = false;
 int s_interface = 0;
 unsigned char s_endpoint = 0x81;
 uint32_t s_previous_guest_mask = ~uint32_t{0};
+std::chrono::steady_clock::time_point s_press_hold_until[20]{};
+uint64_t s_guest_updates = 0;
 std::atomic<bool> s_polling{false};
 std::atomic<uint32_t> s_buttons{0};
+// Preserve press edges even if press+release arrive between EE input polls.
+std::atomic<uint32_t> s_press_edges{0};
 std::atomic<uint64_t> s_reports{0}, s_changes{0}, s_failures{0}, s_timeouts{0};
 
 bool ResolveFunctions(int module)
@@ -195,11 +201,14 @@ void* USBThread(void*)
                     parsed ? 1 : 0);
             if (parsed)
             {
-                const uint32_t old = s_buttons.exchange(mask, std::memory_order_release);
+                const uint32_t old = s_buttons.exchange(mask, std::memory_order_acq_rel);
+                const uint32_t edges = mask & ~old;
+                if (edges)
+                    s_press_edges.fetch_or(edges, std::memory_order_release);
                 if (mask != old)
                 {
                     const uint64_t changed = s_changes.fetch_add(1, std::memory_order_relaxed) + 1;
-                    if (changed <= 64)
+                    if (changed <= 256)
                         ProbeLog("BUZZ_USB: HID buttons changed=%llu mask=%05x\n",
                             static_cast<unsigned long long>(changed), mask);
                 }
@@ -269,6 +278,10 @@ void PS4BuzzUSBStart()
 {
     s_session = true;
     s_previous_guest_mask = ~uint32_t{0};
+    for (auto& until : s_press_hold_until)
+        until = std::chrono::steady_clock::time_point{};
+    s_guest_updates = 0;
+    s_press_edges.store(0);
     s_buttons.store(0);
     s_reports.store(0);
     s_changes.store(0);
@@ -388,7 +401,20 @@ void PS4BuzzUSBPollGuest()
 {
     if (!s_session)
         return;
-    const uint32_t mask = s_buttons.load(std::memory_order_acquire);
+    // At slow emulation speeds, real HID press+release can occur between guest
+    // polls. Latch rising edges for at least 120 ms of host time, so that the
+    // emulated PS2 USB interrupt endpoint has a chance to observe the press.
+    const auto now = std::chrono::steady_clock::now();
+    const uint32_t physical = s_buttons.load(std::memory_order_acquire);
+    const uint32_t edges = s_press_edges.exchange(0, std::memory_order_acq_rel);
+    for (unsigned bit = 0; bit < 20; ++bit)
+        if (edges & (1u << bit))
+            s_press_hold_until[bit] = now + std::chrono::milliseconds(120);
+
+    uint32_t mask = physical;
+    for (unsigned bit = 0; bit < 20; ++bit)
+        if (now < s_press_hold_until[bit])
+            mask |= (1u << bit);
     const uint32_t diff = s_previous_guest_mask ^ mask;
     if (!diff)
         return;
@@ -399,20 +425,27 @@ void PS4BuzzUSBPollGuest()
             USB::SetDeviceBindValue(GUEST_PORT, binding, (mask & (1u << BIT_FOR_BIND[binding])) ? 1.0f : 0.0f);
     }
     s_previous_guest_mask = mask;
-    static unsigned forwarded = 0;
-    if (++forwarded <= 64)
-        ProbeLog("BUZZ_USB: guest update=%u raw_mask=%05x changed=%05x\n", forwarded, mask, diff);
+    ++s_guest_updates;
+    if (s_guest_updates <= 256)
+        ProbeLog("BUZZ_USB: guest update=%llu mask=%05x physical=%05x new_edges=%05x changed=%05x\n",
+            static_cast<unsigned long long>(s_guest_updates), mask, physical, edges, diff);
 }
 
 void PS4BuzzUSBLogStatus()
 {
     if (!s_session)
         return;
-    ProbeLog("BUZZ_USB: status polling=%d reports=%llu button_changes=%llu failures=%llu timeouts=%llu guest_mask=%05x\n",
+    uint64_t guest_polls = 0, guest_reports = 0, guest_naks = 0;
+    usb_pad::BuzzGetTrafficStats(guest_polls, guest_reports, guest_naks);
+    ProbeLog("BUZZ_USB: status polling=%d host_reports=%llu host_changes=%llu host_failures=%llu host_timeouts=%llu guest_updates=%llu guest_mask=%05x guest_IN_polls=%llu guest_reports=%llu guest_NAKs=%llu\n",
         s_polling.load() ? 1 : 0,
         static_cast<unsigned long long>(s_reports.load()),
         static_cast<unsigned long long>(s_changes.load()),
         static_cast<unsigned long long>(s_failures.load()),
         static_cast<unsigned long long>(s_timeouts.load()),
-        s_previous_guest_mask & BUTTON_MASK);
+        static_cast<unsigned long long>(s_guest_updates),
+        s_previous_guest_mask & BUTTON_MASK,
+        static_cast<unsigned long long>(guest_polls),
+        static_cast<unsigned long long>(guest_reports),
+        static_cast<unsigned long long>(guest_naks));
 }
