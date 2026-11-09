@@ -54,6 +54,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <atomic>
+#include <cstdint>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
